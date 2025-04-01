@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Aplicación de Esclerometría - Informe y Planillas de Trabajo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase: Actualiza la configuración con la de tu proyecto -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    /* Pestañas */
+    .tab { display: none; }
+    .tab-active { display: block; }
+    .tab-button {
+      padding: 8px 16px; border: none; cursor: pointer; background: #e2e8f0;
+      margin-right: 4px; border-radius: 4px; font-weight: bold;
+    }
+    .tab-button-active { background: #1d4ed8; color: white; }
+    /* Formato de informe (A4) para exportar a Word */
+    #planillaDocumento, .ensayo {
+      width: 210mm; margin: 0 auto; background: #fff; padding: 20px; margin-bottom: 20px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 6px; border: 1px solid #000; vertical-align: middle; }
+    th { background: #f0f0f0; text-align: center; }
+    td[contenteditable="true"] { background: #fff9e8; }
+    .encabezado {
+      border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 10px;
+      display: flex; align-items: center;
+    }
+    .encabezado img { width: 120px; height: auto; margin-right: 20px; }
+    .encabezado-texto { text-align: center; flex: 1; }
+    .encabezado-texto h1 { margin: 0; font-size: 18px; font-weight: bold; }
+    .encabezado-texto h2 { margin: 0; font-size: 16px; }
+    .titulo-ensayo {
+      text-align: center; font-size: 15px; font-weight: bold; margin: 15px 0;
+      text-transform: uppercase;
+    }
+    .boton { margin: 10px 0; background: #1d4ed8; color: #fff; padding: 8px 16px;
+      border-radius: 4px; cursor: pointer; border: none;
+    }
+    .boton-maps { background: #2563eb; }
+    .firma { margin-top: 40px; }
+    /* Selector de método, ángulo y normativa */
+    #modoCalculo, #anguloEnsayo, #normativaSelect { border: 1px solid #ccc; padding: 4px; border-radius: 4px; }
+    #metodoUsadoTexto, #normativaInfo { font-style: italic; font-size: 0.9rem; color: #555; margin-top: 4px; }
+    /* Planilla de trabajo (secciones numeradas) */
+    #planillaDocumento h1, #planillaDocumento h2, #planillaDocumento h3 {
+      text-align: center; margin-top: 12px; margin-bottom: 12px;
+    }
+    #planillaDocumento h1 { font-size: 18px; font-weight: bold; }
+    #planillaDocumento h2 { font-size: 16px; }
+    #planillaDocumento h3 { font-size: 15px; }
+    #planillaDocumento p { font-size: 14px; line-height: 1.4; }
+    #planillaConclusion { margin-top: 20px; padding: 10px; background: #eef; border: 1px solid #99c; }
+    /* Modal de notificación */
+    #modalNotificacion {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center;
+    }
+    #modalNotificacion .contenido {
+      background: #fff; padding: 20px; border-radius: 8px; text-align: center;
+    }
+    /* Cuadro de Observaciones Normativas */
+    .observacionNormativa {
+      margin-top: 10px; border: 1px solid #ccc; padding: 10px; background: #f9f9f9;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 p-4">
+  <!-- Modal de notificación -->
+  <div id="modalNotificacion" role="alertdialog" aria-modal="true">
+    <div class="contenido">
+      <p id="modalMensaje">Notificación</p>
+      <button class="boton mt-4" onclick="cerrarModal()">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- Encabezado y navegación -->
+  <header class="mb-4">
+    <nav>
+      <button id="tabBtnInforme" class="tab-button tab-button-active" onclick="showTab('informeTab')" aria-label="Mostrar Creación de Informe">Creación de Informe</button>
+      <button id="tabBtnPlanillas" class="tab-button" onclick="showTab('planillasTab'); actualizarPlanillaConclusiones();" aria-label="Mostrar Planillas de Trabajo">Planillas de Trabajo</button>
+    </nav>
+  </header>
+
+  <!-- Contenido principal -->
+  <main>
+    <!-- Pestaña: Creación de Informe con múltiples ensayos -->
+    <section id="informeTab" class="tab tab-active" role="tabpanel">
+      <!-- Selector de método de cálculo -->
+      <div class="mb-4">
+        <label class="block font-semibold" for="modoCalculo">Método de Cálculo de Resistencia:</label>
+        <select id="modoCalculo" onchange="guardarMetodoCalculo(); actualizarVisibilidadAngulo();" class="border rounded p-1">
+          <option value="tabla">Tabla de Conversión</option>
+          <option value="curva">Curva Modelo L</option>
+        </select>
+        <p id="metodoUsadoTexto"></p>
+      </div>
+      <!-- Selector de ángulo (visible solo si se usa la curva) -->
+      <div class="mb-4" id="divAngulo" style="display: none;">
+        <label class="block font-semibold" for="anguloEnsayo">Ángulo del ensayo:</label>
+        <select id="anguloEnsayo" onchange="recalcularTodasFilas();" class="border rounded p-1">
+          <option value="0">0° (Horizontal)</option>
+          <option value="45">45°</option>
+          <option value="90">90° (Vertical)</option>
+        </select>
+      </div>
+      <!-- Selector de normativa -->
+      <div class="mb-4">
+        <label class="block font-semibold" for="normativaSelect">Normativa:</label>
+        <select id="normativaSelect" onchange="actualizarNormativa()" class="border rounded p-1">
+          <option value="ASTM C805">ASTM C805</option>
+          <option value="EN 12504-2">EN 12504-2</option>
+          <option value="ISO 8045">ISO 8045</option>
+          <option value="BS 1881 Pt.202">BS 1881 Pt.202</option>
+          <option value="DIN 1048-2">DIN 1048-2</option>
+          <option value="NFP 18-417">NFP 18-417</option>
+          <option value="NBN B 15-225">NBN B 15-225</option>
+          <option value="JGJ/T 23-2011">JGJ/T 23-2011</option>
+          <option value="JJG 817-2011">JJG 817-2011</option>
+        </select>
+        <p id="normativaInfo"></p>
+      </div>
+      <!-- Sección para cargar logo -->
+      <div class="mb-4">
+        <label class="block font-semibold" for="logoInput">Cargar Logo:</label>
+        <input type="file" id="logoInput" accept="image/*" onchange="cargarLogo(event)" aria-label="Cargar logo">
+      </div>
+      <!-- Sección para cargar plantilla de pie de página (HTML) -->
+      <div class="mb-4">
+        <label class="block font-semibold" for="templateFooterInput">Cargar Pie de Página (HTML):</label>
+        <input type="file" id="templateFooterInput" accept="text/*" onchange="cargarTemplateFooter(event)" aria-label="Cargar plantilla de pie de página">
+      </div>
+      <!-- Botones principales para el informe -->
+      <div class="mb-4">
+        <button class="boton" onclick="exportToWord('ensayosContainer','Informe_Esclerometria')" aria-label="Exportar a Word">Exportar a Word</button>
+        <button class="boton" onclick="generarConclusionAI()" aria-label="Generar Conclusión AI">Generar Conclusión AI</button>
+        <button class="boton" onclick="guardarInformeEnLaNube()" aria-label="Guardar Informe en la Nube">Guardar Informe en la Nube</button>
+      </div>
+      <!-- Campo Ubicación y botón para Google Maps -->
+      <div class="mb-4">
+        <label class="block font-semibold">Ubicación:</label>
+        <span contenteditable="true" id="ubicacionInforme" aria-label="Ubicación del ensayo">[Ingrese la ubicación]</span>
+        <button class="boton boton-maps" onclick="verEnGoogleMaps()" aria-label="Ver en Google Maps">Ver en Google Maps</button>
+      </div>
+      <!-- Contenedor para múltiples ensayos -->
+      <div id="ensayosContainer"></div>
+      <button class="boton mt-4" onclick="agregarEnsayo()">Agregar Nuevo Ensayo</button>
+    </section>
+
+    <!-- Pestaña: Planillas de Trabajo (Hoja fija, si se requiere) -->
+    <section id="planillasTab" class="tab" role="tabpanel">
+      <h1 class="text-2xl font-bold mb-4">Planillas de Trabajo</h1>
+      <div id="planillaDocumento">
+        <h1>1. ENSAYO DE ESCLEROMETRÍA</h1>
+        <p><em>"VIVIENDA FAMILIAR"</em></p>
+        <h2>2. ENSAYO DE RESISTENCIA DEL HORMIGÓN MEDIANTE ESCLERÓMETRO O ÍNDICE DE REBOTE</h2>
+        <h3>
+          3. UBICACIÓN:
+          <span id="ubicacionPlanilla" contenteditable="true">[Ingrese la ubicación]</span>
+          <input type="file" id="planillaImageInput" accept="image/*" onchange="insertarImagenPlanilla(event)" style="margin-left:10px;" aria-label="Insertar imagen en la plantilla">
+        </h3>
+        <h3>4. INTRODUCCIÓN</h3>
+        <p>
+          El ensayo de esclerómetro o índice de rebote es una prueba no destructiva para estimar la resistencia del hormigón...
+        </p>
+        <!-- ... Resto de secciones de la planilla ... -->
+        <h3>14. CONCLUSIONES CORRELACIONADAS</h3>
+        <div id="planillaConclusion">(La conclusión generada aparecerá aquí)</div>
+      </div>
+      <div class="mt-4">
+        <button class="boton" onclick="exportToWord('planillaDocumento','Planilla_Esclerometria')" aria-label="Exportar Planilla a Word">Exportar Planilla a Word</button>
+        <button class="boton ml-2" onclick="actualizarPlanillaConclusiones()">Actualizar Conclusiones</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="mt-4 text-center">
+    <p>&copy; 2025 - Aplicación de Esclerometría</p>
+  </footer>
+
+  <!-- Template para hoja de ensayo -->
+  <template id="ensayoTemplate">
+    <div class="ensayo">
+      <header class="encabezado">
+        <img class="logoImage" src="https://via.placeholder.com/120x80.png?text=LOGO" alt="Logo de la empresa">
+        <div class="encabezado-texto">
+          <h1>GEOTECNIA Y TOPOGRAFÍA CONALTURA</h1>
+          <h2>Ingeniería y Construcción</h2>
+        </div>
+      </header>
+      <h2 class="titulo-ensayo">ENSAYO DE RESISTENCIA DEL HORMIGÓN MEDIANTE EL MARTILLO DE ESCLEROMETRÍA</h2>
+      <!-- Datos generales -->
+      <table class="mb-4">
+        <tr>
+          <td style="width:20%; font-weight:bold;">Proyecto:</td>
+          <td style="width:30%;" contenteditable="true" class="proyecto">VIVIENDA MULTIFAMILIAR</td>
+          <td style="width:20%; font-weight:bold;">Propietario:</td>
+          <td style="width:30%;" contenteditable="true" class="propietario">Nombre del Propietario</td>
+        </tr>
+        <tr>
+          <td style="font-weight:bold;">Fecha:</td>
+          <td contenteditable="true" class="fecha">2025-04-01</td>
+          <td style="font-weight:bold;">Equipo:</td>
+          <td contenteditable="true" class="equipo">Martillo Esclerométrico XYZ</td>
+        </tr>
+        <tr>
+          <td style="font-weight:bold;">Modelo:</td>
+          <td contenteditable="true" class="modelo">S/M</td>
+          <td style="font-weight:bold;">Norma:</td>
+          <td contenteditable="true" class="norma">ASTM C805</td>
+        </tr>
+        <tr>
+          <td style="font-weight:bold;">Edad de la Estructura (años):</td>
+          <td contenteditable="true" class="edad">10</td>
+          <td></td>
+          <td></td>
+        </tr>
+      </table>
+      <!-- Subtítulo del ensayo -->
+      <p style="font-weight:bold; margin-bottom:5px;">Ensayo: <span contenteditable="true" class="tipoEnsayo">COLUMNA HºAº 30x30 cm</span></p>
+      <!-- Tabla de lecturas y cálculos -->
+      <table class="tablaRebotes">
+        <thead>
+          <tr>
+            <th style="width:10%;">PUNTOS DE ENSAYO</th>
+            <th style="width:15%;">LECTURA (R)</th>
+            <th style="width:20%;">RESISTENCIA (MPa)</th>
+            <th style="width:20%;">RESISTENCIA (Kg/cm²)</th>
+            <th style="width:35%;">Observaciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:center;">1</td>
+            <td contenteditable="true" oninput="recalcularFila(this)">38</td>
+            <td class="colMpa"></td>
+            <td class="colKg"></td>
+            <td contenteditable="true" class="colObservacion">DISPERSIÓN</td>
+          </tr>
+          <tr>
+            <td style="text-align:center;">2</td>
+            <td contenteditable="true" oninput="recalcularFila(this)">40</td>
+            <td class="colMpa"></td>
+            <td class="colKg"></td>
+            <td contenteditable="true" class="colObservacion">DISPERSIÓN</td>
+          </tr>
+          <tr>
+            <td style="text-align:center;">3</td>
+            <td contenteditable="true" oninput="recalcularFila(this)">36</td>
+            <td class="colMpa"></td>
+            <td class="colKg"></td>
+            <td contenteditable="true" class="colObservacion">DISPERSIÓN</td>
+          </tr>
+          <tr>
+            <td style="text-align:center;">4</td>
+            <td contenteditable="true" oninput="recalcularFila(this)">39</td>
+            <td class="colMpa"></td>
+            <td class="colKg"></td>
+            <td contenteditable="true" class="colObservacion">DISPERSIÓN</td>
+          </tr>
+          <tr>
+            <td style="text-align:center;">5</td>
+            <td contenteditable="true" oninput="recalcularFila(this)">37</td>
+            <td class="colMpa"></td>
+            <td class="colKg"></td>
+            <td contenteditable="true" class="colObservacion">DISPERSIÓN</td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- Resultados y conclusión -->
+      <p class="promedios" style="margin-top:20px; font-weight:bold;">Promedio (MPa): - - Dispersión (Kg/cm²): -</p>
+      <p class="conclusionFinal" contenteditable="true" style="margin-bottom:20px;">Conclusiones: (Aquí se generará la conclusión AI)</p>
+      <!-- Botón para eliminar el ensayo -->
+      <button class="boton bg-red-500" onclick="eliminarEnsayo(this)">Eliminar Ensayo</button>
+      <!-- Cuadro de Observaciones Normativas -->
+      <div class="observacionNormativa">
+        Observaciones Normativas: (Aquí se mostrarán datos de la norma)
+      </div>
+      <!-- Firma del ingeniero -->
+      <div class="firma" style="margin-top:30px;">
+        <p>Firma del Ingeniero:</p>
+        <p style="margin-top:50px;">______________________________</p>
+      </div>
+    </div>
+  </template>
+
+  <!-- Pestaña: Planillas de Trabajo (Hoja fija, si se requiere) -->
+  <section id="planillasTab" class="tab" role="tabpanel">
+    <h1 class="text-2xl font-bold mb-4">Planillas de Trabajo</h1>
+    <div id="planillaDocumento">
+      <h1>1. ENSAYO DE ESCLEROMETRÍA</h1>
+      <p><em>"VIVIENDA FAMILIAR"</em></p>
+      <h2>2. ENSAYO DE RESISTENCIA DEL HORMIGÓN MEDIANTE ESCLERÓMETRO O ÍNDICE DE REBOTE</h2>
+      <h3>
+        3. UBICACIÓN:
+        <span id="ubicacionPlanilla" contenteditable="true">[Ingrese la ubicación]</span>
+        <input type="file" id="planillaImageInput" accept="image/*" onchange="insertarImagenPlanilla(event)" style="margin-left:10px;" aria-label="Insertar imagen en la plantilla">
+      </h3>
+      <h3>4. INTRODUCCIÓN</h3>
+      <p>
+        El ensayo de esclerómetro o índice de rebote es una prueba no destructiva para estimar la resistencia del hormigón...
+      </p>
+      <!-- ... Resto de secciones de la planilla ... -->
+      <h3>14. CONCLUSIONES CORRELACIONADAS</h3>
+      <div id="planillaConclusion">(La conclusión generada aparecerá aquí)</div>
+    </div>
+    <div class="mt-4">
+      <button class="boton" onclick="exportToWord('planillaDocumento','Planilla_Esclerometria')" aria-label="Exportar Planilla a Word">Exportar Planilla a Word</button>
+      <button class="boton ml-2" onclick="actualizarPlanillaConclusiones()">Actualizar Conclusiones</button>
+    </div>
+  </section>
+  </main>
+
+  <footer class="mt-4 text-center">
+    <p>&copy; 2025 - Aplicación de Esclerometría</p>
+  </footer>
+
+  <!-- Firebase Initialization (Reemplaza con tus credenciales reales) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "TU_API_KEY",
+      authDomain: "tu-proyecto.firebaseapp.com",
+      projectId: "tu-proyecto",
+      storageBucket: "tu-proyecto.appspot.com",
+      messagingSenderId: "TU_MESSAGING_SENDER_ID",
+      appId: "TU_APP_ID"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
+
+  <script>
+    /* ===================== Función debounce (opcional) ===================== */
+    function debounce(func, wait, immediate) {
+      let timeout;
+      return function() {
+        let context = this, args = arguments;
+        let later = function() {
+          timeout = null;
+          if (!immediate) func.apply(context, args);
+        };
+        let callNow = immediate && !timeout;
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+        if (callNow) func.apply(context, args);
+      };
+    }
+
+    /* ===================== Navegación de Pestañas ===================== */
+    function showTab(tabId) {
+      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('tab-active'));
+      document.getElementById(tabId).classList.add('tab-active');
+    }
+    document.addEventListener("DOMContentLoaded", () => { showTab('informeTab'); });
+
+    /* ===================== Arreglo de Normativas ===================== */
+    const normativas = [
+      { name: "ASTM C805", finalidad: "Estimación de resistencia y uniformidad del concreto", minImpactos: 10, criterio: "Descartar ±20% del promedio", estadística: "Promedio", superficie: "Limpia, seca, sin estuco", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Evaluación preliminar y seguimiento de calidad" },
+      { name: "EN 12504-2", finalidad: "Evaluación de dureza superficial e indicación de resistencia", minImpactos: 9, criterio: "Repetir si >20% se desvían >6 unidades de la mediana", estadística: "Mediana", superficie: "Preparada, lisa, seca", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Inspección estructural y comparación superficial" },
+      { name: "ISO 8045", finalidad: "Norma internacional para medir dureza superficial", minImpactos: "9–12", criterio: "Repetir si hay mucha dispersión", estadística: "Mediana", superficie: "Limpia, sin recubrimientos", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Referencia internacional de medición" },
+      { name: "BS 1881 Pt.202", finalidad: "Evaluación de uniformidad/resistencia superficial", minImpactos: "10–12", criterio: "Descartar si error evidente", estadística: "Promedio", superficie: "Limpia, sin desconches", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Control de uniformidad y patología" },
+      { name: "DIN 1048-2", finalidad: "Control de calidad en estructuras", minImpactos: "≈10", criterio: "Excluir valores erróneos visibles", estadística: "Promedio", superficie: "Plana, firme, sin polvo", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Verificación estructural no destructiva" },
+      { name: "NFP 18-417", finalidad: "Diagnóstico superficial del hormigón", minImpactos: "≥10", criterio: "Promediar excluyendo extremos", estadística: "Promedio", superficie: "Sin lechada ni pintura", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Ensayo preliminar en diagnósticos" },
+      { name: "NBN B 15-225", finalidad: "Evaluación estructural sin daño", minImpactos: "≥10", criterio: "Excluir valores aberrantes justificados", estadística: "Promedio", superficie: "Desnuda y regular", correlacion: "Sí", utilidad: "No", orientacion: "Sí", uso: "Control exploratorio de calidad" },
+      { name: "JGJ/T 23-2011", finalidad: "Estimación de resistencia in situ (China)", minImpactos: 16, criterio: "Eliminar 3 altos y 3 bajos de 16", estadística: "Promedio (de 10)", superficie: "Lijada, sin agregado expuesto", correlacion: "Sí (curvas estándar)", utilidad: "Sí con condiciones", orientacion: "Sí", uso: "Control estructural en China" },
+      { name: "JJG 817-2011", finalidad: "Verificación metrológica del martillo", minImpactos: "10 (en yunque)", criterio: "Debe estar dentro de 80±2 (yunque)", estadística: "Promedio", superficie: "Yunque patrón", correlacion: "No aplica", utilidad: "No", orientacion: "Sí (horizontal preferido)", uso: "Calibración de precisión del equipo" }
+    ];
+
+    /* ===================== Función para calcular la dispersión ===================== */
+    function calcularDispersion(kg) {
+      if (kg >= 100 && kg < 200) {
+        return "+-45";
+      } else if (kg >= 200 && kg < 300) {
+        return "+-60";
+      } else if (kg >= 300 && kg < 400) {
+        return "+-65";
+      } else if (kg >= 400 && kg < 500) {
+        return "+-70";
+      } else if (kg >= 500 && kg < 600) {
+        return "+-75";
+      } else if (kg >= 600 && kg <= 700) {
+        return "+-75";
+      } else {
+        return "";
+      }
+    }
+
+    /* ===================== Actualizar Observación Normativa ===================== */
+    function getObservacionNormativa(normObj) {
+      return `
+        <table style="width:100%; border-collapse: collapse; font-size: 14px; margin-top:5px;">
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">Criterio</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.criterio}</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">Medida estadística</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.estadística}</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">Condiciones de superficie</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.superficie}</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">¿Requiere correlación?</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.correlacion}</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">¿Útil para aceptación?</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.utilidad}</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">¿Corrige orientación?</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.orientacion}</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid #000; padding:4px; background:#f0f0f0;">Uso recomendado</th>
+            <td style="border:1px solid #000; padding:4px;">${normObj.uso}</td>
+          </tr>
+        </table>
+      `;
+    }
+    function actualizarObservacionNormativa() {
+      const normativaSelect = document.getElementById("normativaSelect");
+      const normObj = normativas.find(n => n.name === normativaSelect.value);
+      if (!normObj) return;
+      
+      const ensayos = document.querySelectorAll(".ensayo");
+      ensayos.forEach(ensayo => {
+        const obsDiv = ensayo.querySelector(".observacionNormativa");
+        if (obsDiv) {
+          obsDiv.innerHTML = `
+            <p style="font-weight:bold; margin-bottom:5px;">Observaciones Normativas</p>
+            ${getObservacionNormativa(normObj)}
+          `;
+        }
+      });
+    }
+    /* ===================== Actualizar Normativa ===================== */
+    function actualizarNormativa() {
+      const normativaSelect = document.getElementById("normativaSelect");
+      const selected = normativaSelect.value;
+      const infoElem = document.getElementById("normativaInfo");
+      const normObj = normativas.find(n => n.name === selected);
+      if (normObj) {
+        infoElem.innerText = `Normativa: ${normObj.name} | Nº mínimo de impactos: ${normObj.minImpactos}`;
+      } else {
+        infoElem.innerText = "";
+      }
+      actualizarPuntosEnsayo();
+      actualizarObservacionNormativa();
+    }
+    /* ===================== Actualizar Puntos de Ensayo según Normativa ===================== */
+    function actualizarPuntosEnsayo() {
+      const normativaSelect = document.getElementById("normativaSelect");
+      const normObj = normativas.find(n => n.name === normativaSelect.value);
+      if (!normObj) return;
+      
+      let minImpactos = normObj.minImpactos;
+      if (typeof minImpactos === "string") {
+        if (minImpactos.includes("–")) {
+          minImpactos = parseInt(minImpactos.split("–")[0]);
+        } else {
+          minImpactos = parseInt(minImpactos);
+        }
+      }
+      const ensayos = document.querySelectorAll(".ensayo");
+      ensayos.forEach(ensayo => {
+        const tbody = ensayo.querySelector(".tablaRebotes tbody");
+        if (!tbody) return;
+        let currentRows = tbody.querySelectorAll("tr").length;
+        while (currentRows < minImpactos) {
+          let newRow;
+          if (currentRows > 0) {
+            const lastRow = tbody.querySelector("tr:last-child");
+            newRow = lastRow.cloneNode(true);
+            newRow.querySelectorAll("td").forEach((cell, index) => {
+              if (index === 0) {
+                cell.innerText = currentRows + 1;
+              } else if (cell.hasAttribute("contenteditable")) {
+                cell.innerText = (index === 4) ? "DISPERSIÓN" : "";
+              }
+            });
+          } else {
+            newRow = document.createElement("tr");
+            newRow.innerHTML = `
+              <td style="text-align:center;">1</td>
+              <td contenteditable="true" oninput="recalcularFila(this)">0</td>
+              <td class="colMpa"></td>
+              <td class="colKg"></td>
+              <td contenteditable="true" class="colObservacion">DISPERSIÓN</td>
+            `;
+          }
+          tbody.appendChild(newRow);
+          currentRows++;
+        }
+      });
+    }
+
+    /* ===================== Actualizar Conclusiones en Planilla ===================== */
+    function actualizarPlanillaConclusiones() {
+      const conclusionAI = document.getElementById("conclusionFinal").innerText || "";
+      document.getElementById("planillaConclusion").innerText = conclusionAI;
+      const ubicacion = document.getElementById("ubicacionInforme").innerText;
+      document.getElementById("ubicacionPlanilla").innerText = ubicacion;
+    }
+
+    /* ===================== Insertar Logo (Informe) ===================== */
+    function cargarLogo(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          document.querySelectorAll(".logoImage").forEach(img => {
+            img.src = e.target.result;
+          });
+          localStorage.setItem("logoData", e.target.result);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    /* ===================== Insertar Imagen en Planilla (Ubicación) ===================== */
+    function insertarImagenPlanilla(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          const inputElem = document.getElementById("planillaImageInput");
+          const img = document.createElement("img");
+          img.src = e.target.result;
+          img.alt = "Imagen insertada";
+          img.style.maxWidth = "100%";
+          img.style.marginTop = "10px";
+          inputElem.insertAdjacentElement("afterend", img);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    /* ===================== Funciones de Cálculo ===================== */
+    const tablaConversion = [
+      { raw: 20, mpa: 10.00, kg: 102.04 },
+      { raw: 22, mpa: 13.00, kg: 132.65 },
+      { raw: 24, mpa: 15.00, kg: 153.06 },
+      { raw: 26, mpa: 18.00, kg: 183.67 },
+      { raw: 28, mpa: 20.00, kg: 204.08 },
+      { raw: 29, mpa: 21.00, kg: 214.29 },
+      { raw: 30, mpa: 22.00, kg: 224.49 },
+      { raw: 32, mpa: 25.00, kg: 255.10 },
+      { raw: 34, mpa: 28.00, kg: 285.71 },
+      { raw: 36, mpa: 30.00, kg: 306.12 },
+      { raw: 38, mpa: 35.00, kg: 357.14 },
+      { raw: 40, mpa: 40.00, kg: 408.16 }
+    ];
+    const curvaL0 = [
+      { raw: 20, kg: 100 }, { raw: 21, kg: 120 }, { raw: 22, kg: 140 }, { raw: 23, kg: 150 },
+      { raw: 24, kg: 170 }, { raw: 25, kg: 185 }, { raw: 26, kg: 200 }, { raw: 27, kg: 220 },
+      { raw: 28, kg: 235 }, { raw: 29, kg: 250 }, { raw: 30, kg: 265 }, { raw: 31, kg: 280 },
+      { raw: 32, kg: 300 }, { raw: 33, kg: 320 }, { raw: 34, kg: 340 }, { raw: 35, kg: 358 },
+      { raw: 36, kg: 378 }, { raw: 37, kg: 390 }, { raw: 38, kg: 410 }, { raw: 39, kg: 430 },
+      { raw: 40, kg: 450 }, { raw: 41, kg: 470 }, { raw: 42, kg: 480 }, { raw: 43, kg: 500 },
+      { raw: 44, kg: 520 }, { raw: 45, kg: 540 }, { raw: 46, kg: 560 }, { raw: 47, kg: 580 },
+      { raw: 48, kg: 600 }, { raw: 49, kg: 620 }, { raw: 50, kg: 640 }
+    ];
+    const curvaL45 = [
+      { raw: 20, kg: 190 }, { raw: 21, kg: 200 }, { raw: 22, kg: 220 }, { raw: 23, kg: 235 },
+      { raw: 24, kg: 250 }, { raw: 25, kg: 270 }, { raw: 26, kg: 280 }, { raw: 27, kg: 300 },
+      { raw: 28, kg: 320 }, { raw: 29, kg: 338 }, { raw: 30, kg: 350 }, { raw: 31, kg: 370 },
+      { raw: 32, kg: 390 }, { raw: 33, kg: 400 }, { raw: 34, kg: 420 }, { raw: 35, kg: 440 },
+      { raw: 36, kg: 460 }, { raw: 37, kg: 480 }, { raw: 38, kg: 500 }, { raw: 39, kg: 510 },
+      { raw: 40, kg: 530 }, { raw: 41, kg: 550 }, { raw: 42, kg: 570 }, { raw: 43, kg: 580 },
+      { raw: 44, kg: 600 }, { raw: 45, kg: 620 }, { raw: 46, kg: 640 }, { raw: 47, kg: 660 },
+      { raw: 48, kg: 680 }, { raw: 49, kg: 700 }, { raw: 50, kg: 720 }
+    ];
+    const curvaL90 = [
+      { raw: 20, kg: 240 }, { raw: 21, kg: 260 }, { raw: 22, kg: 280 }, { raw: 23, kg: 290 },
+      { raw: 24, kg: 305 }, { raw: 25, kg: 320 }, { raw: 26, kg: 340 }, { raw: 27, kg: 360 },
+      { raw: 28, kg: 370 }, { raw: 29, kg: 390 }, { raw: 30, kg: 405 }, { raw: 31, kg: 420 },
+      { raw: 32, kg: 440 }, { raw: 33, kg: 460 }, { raw: 34, kg: 480 }, { raw: 35, kg: 500 },
+      { raw: 36, kg: 510 }, { raw: 37, kg: 525 }, { raw: 38, kg: 540 }, { raw: 39, kg: 560 },
+      { raw: 40, kg: 580 }, { raw: 41, kg: 600 }, { raw: 42, kg: 620 }, { raw: 43, kg: 640 },
+      { raw: 44, kg: 660 }, { raw: 45, kg: 680 }, { raw: 46, kg: 700 }, { raw: 47, kg: 720 },
+      { raw: 48, kg: 740 }, { raw: 49, kg: 760 }, { raw: 50, kg: 720 }
+    ];
+
+    function obtenerCurvaModeloL() {
+      const angulo = document.getElementById("anguloEnsayo").value;
+      if (angulo === "0") return curvaL0;
+      if (angulo === "45") return curvaL45;
+      if (angulo === "90") return curvaL90;
+      return curvaL0;
+    }
+
+    function guardarMetodoCalculo() {
+      const metodo = document.getElementById("modoCalculo").value;
+      localStorage.setItem("modoCalculo", metodo);
+    }
+
+    function actualizarVisibilidadAngulo() {
+      const metodo = localStorage.getItem("modoCalculo") || "tabla";
+      document.getElementById("divAngulo").style.display = (metodo === "curva") ? "block" : "none";
+      recalcularTodasFilas();
+    }
+
+    // Aplica el método de cálculo para un valor R
+    function aplicarMetodoCalculo(r) {
+      const metodo = localStorage.getItem("modoCalculo") || "tabla";
+      const textoMetodo = (metodo === "curva")
+        ? "Curva Modelo L (Interpolación)"
+        : "Tabla de Conversión (Estándar)";
+      document.getElementById("metodoUsadoTexto").innerText = "Método utilizado: " + textoMetodo;
+      if (metodo === "tabla") {
+        const resultadoMPA = interpolar(r, tablaConversion, "mpa");
+        const resultadoKG = interpolar(r, tablaConversion, "kg");
+        return { mpa: resultadoMPA.mpa, kg: resultadoKG.kg };
+      } else {
+        const curva = obtenerCurvaModeloL();
+        const resultado = interpolar(r, curva, "kg");
+        return { mpa: resultado.kg / 10, kg: resultado.kg };
+      }
+    }
+
+    // Interpolación lineal
+    function interpolar(x, data, campo) {
+      if (x <= data[0].raw) return data[0];
+      if (x >= data[data.length - 1].raw) return data[data.length - 1];
+      for (let i = 0; i < data.length - 1; i++) {
+        const a = data[i], b = data[i + 1];
+        if (x >= a.raw && x <= b.raw) {
+          const factor = (x - a.raw) / (b.raw - a.raw);
+          const y = a[campo] + factor * (b[campo] - a[campo]);
+          return { raw: x, [campo]: parseFloat(y.toFixed(2)) };
+        }
+      }
+      return data[0];
+    }
+
+    // Recalcula una fila al editar el valor R y actualiza la dispersión en observaciones
+    function recalcularFila(cell) {
+      const fila = cell.parentNode;
+      const valorRebote = parseFloat(cell.innerText.trim());
+      const colMpa = fila.querySelector(".colMpa");
+      const colKg = fila.querySelector(".colKg");
+      if (isNaN(valorRebote)) {
+        colMpa.textContent = "";
+        colKg.textContent = "";
+      } else {
+        const resultado = aplicarMetodoCalculo(valorRebote);
+        colMpa.textContent = resultado.mpa.toFixed(2);
+        colKg.textContent = resultado.kg.toFixed(2);
+        // Actualiza la observación con la dispersión según la resistencia
+        const colObservacion = fila.querySelector(".colObservacion");
+        if (colObservacion) {
+          colObservacion.textContent = calcularDispersion(resultado.kg);
+        }
+      }
+      // Recalcula el promedio solo para el ensayo actual
+      const ensayo = cell.closest(".ensayo");
+      if (ensayo) {
+        recalcularPromedioEnsayo(ensayo);
+      }
+    }
+
+    // Calcula el promedio de MPa y la dispersión (desviación estándar) para un ensayo específico
+    function recalcularPromedioEnsayo(ensayo) {
+      let suma = 0, count = 0;
+      let valoresKg = [];
+      const filas = ensayo.querySelectorAll(".tablaRebotes tbody tr");
+      filas.forEach(fila => {
+        const tdMpa = fila.querySelector(".colMpa");
+        const tdKg = fila.querySelector(".colKg");
+        if (tdMpa && tdMpa.textContent.trim() !== "" && tdKg && tdKg.textContent.trim() !== "") {
+          const valMpa = parseFloat(tdMpa.textContent.trim());
+          const valKg = parseFloat(tdKg.textContent.trim());
+          if (!isNaN(valMpa) && !isNaN(valKg)) {
+            suma += valMpa;
+            count++;
+            valoresKg.push(valKg);
+          }
+        }
+      });
+      const promedioElem = ensayo.querySelector(".promedios");
+      if (promedioElem) {
+        if (count > 0) {
+          const promedioMpa = (suma / count).toFixed(2);
+          const desviacionKg = calcularDesviacionEstandar(valoresKg).toFixed(2);
+          promedioElem.textContent = `Promedio (MPa): ${promedioMpa} - Dispersión (Kg/cm²): ${desviacionKg}`;
+          ensayo.dataset.average = promedioMpa;
+          ensayo.dataset.dispersion = desviacionKg;
+        } else {
+          promedioElem.textContent = "Promedio (MPa): - - Dispersión (Kg/cm²): -";
+          ensayo.dataset.average = "";
+          ensayo.dataset.dispersion = "";
+        }
+      }
+    }
+
+    // Función para calcular la desviación estándar
+    function calcularDesviacionEstandar(valores) {
+      const n = valores.length;
+      if (n === 0) return 0;
+      const mean = valores.reduce((acc, val) => acc + val, 0) / n;
+      const variance = valores.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+      return Math.sqrt(variance);
+    }
+
+    // Función para calcular la dispersión según el rango de resistencia (Kg/cm²)
+    function calcularDispersion(kg) {
+      if (kg >= 100 && kg < 200) {
+        return "+-45";
+      } else if (kg >= 200 && kg < 300) {
+        return "+-60";
+      } else if (kg >= 300 && kg < 400) {
+        return "+-65";
+      } else if (kg >= 400 && kg < 500) {
+        return "+-70";
+      } else if (kg >= 500 && kg < 600) {
+        return "+-75";
+      } else if (kg >= 600 && kg <= 700) {
+        return "+-75";
+      } else {
+        return "";
+      }
+    }
+
+    // Recalcula todas las filas de cada ensayo
+    function recalcularTodasFilas() {
+      document.querySelectorAll(".tablaRebotes tbody tr td[oninput]").forEach(cell => recalcularFila(cell));
+    }
+
+    // Genera la conclusión AI para cada ensayo, incorporando la información de la normativa, promedio y dispersión
+    function generarConclusionAI() {
+      const normativaSelect = document.getElementById("normativaSelect");
+      let normativaInfoText = "";
+      if (normativaSelect) {
+        const selectedNormativa = normativaSelect.value;
+        const normObj = normativas.find(n => n.name === selectedNormativa);
+        if (normObj) {
+          normativaInfoText = `Normativa: ${normObj.name}. Finalidad: ${normObj.finalidad}. Nº mínimo de impactos: ${normObj.minImpactos}.`;
+        }
+      }
+      const ensayos = document.querySelectorAll(".ensayo");
+      ensayos.forEach(ensayo => {
+        // Actualiza los cálculos antes de generar la conclusión
+        recalcularPromedioEnsayo(ensayo);
+        const tipoElem = ensayo.querySelector(".tipoEnsayo");
+        const edadElem = ensayo.querySelector(".edad");
+        const promedioElem = ensayo.querySelector(".promedios");
+        const conclusionElem = ensayo.querySelector(".conclusionFinal");
+        const tipo = tipoElem ? tipoElem.innerText.trim() : "No especificado";
+        const edad = edadElem ? edadElem.innerText.trim() : "No especificado";
+        let promedio = "No calculado";
+        let dispersion = "No calculado";
+        if (ensayo.dataset.average && ensayo.dataset.dispersion) {
+          promedio = ensayo.dataset.average;
+          dispersion = ensayo.dataset.dispersion;
+        } else if (promedioElem) {
+          const txt = promedioElem.innerText;
+          const parts = txt.split("-");
+          if (parts.length >= 2) {
+            promedio = parts[0].replace("Promedio (MPa):", "").trim();
+            dispersion = parts[1].replace("Dispersión (Kg/cm²):", "").trim();
+          }
+        }
+        const conclusion = `${normativaInfoText}
+El ensayo realizado en un elemento de tipo ${tipo}, con las dimensiones indicadas y una estructura de ${edad} años, presenta un promedio de resistencia de ${promedio} MPa con una dispersión de ${dispersion} Kg/cm².
+Se recomienda revisar periódicamente el estado del elemento para garantizar la seguridad estructural.`;
+        if (conclusionElem) {
+          conclusionElem.innerText = conclusion;
+        }
+      });
+    }
+
+    // Exporta a Word incluyendo las plantillas de encabezado y pie de página (si se han cargado) y un bloque "prompt" al inicio
+    function exportToWord(elementId, filename) {
+      // Bloque de prompt con el formato solicitado para el encabezado
+      const promptBlock = `
+        <div style="text-align: center; font-family: 'Times New Roman', serif; margin-bottom: 20px;">
+          <p style="font-size: 16pt; font-weight: bold; margin: 0;">ENSAYO DE ESCLEROMETRÍA</p>
+          <p style="font-size: 14pt; font-weight: bold; font-style: italic; margin: 0;">“VIVIENDA FAMILIAR”</p>
+        </div>
+      `;
+      // Recupera la plantilla de encabezado y pie de página almacenadas (si existen)
+      const headerTemplate = localStorage.getItem("templateHeader") || "";
+      const footerTemplate = localStorage.getItem("templateFooter") || "";
+      // Se definen las secciones especiales para Word
+      const headerContent = `<div style="mso-element:header" id="divHeader">${headerTemplate}</div>`;
+      const footerContent = `<div style="mso-element:footer" id="divFooter">${footerTemplate}</div>`;
+      // Obtiene el contenido principal
+      const content = document.getElementById(elementId).innerHTML;
+      // Concatena el bloque prompt, el contenido principal y las secciones especiales
+      const fullContent = headerContent + promptBlock + content + footerContent;
+      const wordStyles = `
+        <style>
+          @page {
+            size: 21cm 29.7cm;
+            margin: 2cm;
+            mso-header-margin: 1cm;
+            mso-footer-margin: 1cm;
+          }
+          div#divHeader { text-align: center; }
+          div#divFooter { text-align: center; }
+          p.MsoNormal, li.MsoNormal, div.MsoNormal {
+            margin: 0in; margin-bottom: .0001pt; font-size: 12pt; font-family: "Times New Roman", serif;
+          }
+          h1 { font-size: 18pt; font-family: "Times New Roman", serif; font-weight: bold; }
+          h2 { font-size: 16pt; font-family: "Times New Roman", serif; }
+        </style>
+      `;
+      const headerHTML = `<html xmlns:o="urn:schemas-microsoft-com:office:office" 
+          xmlns:w="urn:schemas-microsoft-com:office:word" 
+          xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8">
+        <title>Export HTML to Word</title>
+        <!--[if gte mso 9]>
+        <xml>
+          <w:WordDocument>
+            <w:View>Print</w:View>
+            <w:Zoom>100</w:Zoom>
+            <w:DoNotOptimizeForBrowser/>
+          </w:WordDocument>
+        </xml>
+        <![endif]-->
+        ${wordStyles}
+      </head>
+      <body>`;
+      const footerHTML = `</body></html>`;
+      const sourceHTML = headerHTML + fullContent + footerHTML;
+      const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
+      const fileDownload = document.createElement('a');
+      document.body.appendChild(fileDownload);
+      fileDownload.href = source;
+      fileDownload.download = filename + '.doc';
+      fileDownload.click();
+      document.body.removeChild(fileDownload);
+    }
+
+    // Abre la ubicación en Google Maps
+    function verEnGoogleMaps() {
+      const ubicacion = document.getElementById("ubicacionInforme").innerText.trim();
+      if (ubicacion === "" || ubicacion === "[Ingrese la ubicación]") {
+        alert("Por favor, ingrese una ubicación válida.");
+      } else {
+        const url = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(ubicacion);
+        window.open(url, "_blank");
+      }
+    }
+
+    // Guarda el informe en Firebase
+    function guardarInformeEnLaNube() {
+      const reporteHTML = document.getElementById("ensayosContainer").innerHTML;
+      const ubicacion = document.getElementById("ubicacionInforme").innerText;
+      const tipoEnsayo = document.querySelector(".tipoEnsayo").innerText;
+      const edad = document.querySelector(".edad").innerText;
+      const timestamp = new Date();
+      const data = { reporte: reporteHTML, ubicacion, tipoEnsayo, edad, createdAt: timestamp };
+      db.collection("informes").add(data)
+        .then(() => mostrarModal("Informe guardado en la nube exitosamente."))
+        .catch(error => mostrarModal("Error guardando informe: " + error.message));
+    }
+
+    // Modal de notificación
+    function mostrarModal(mensaje) {
+      document.getElementById("modalMensaje").innerText = mensaje;
+      document.getElementById("modalNotificacion").style.display = "flex";
+    }
+    function cerrarModal() {
+      document.getElementById("modalNotificacion").style.display = "none";
+    }
+
+    // ===================== Agregar Múltiples Ensayos =====================
+    let ensayoCounter = 1;
+    function agregarEnsayo() {
+      const template = document.getElementById("ensayoTemplate");
+      const clone = template.content.cloneNode(true);
+      ensayoCounter++;
+      clone.querySelectorAll("[id]").forEach(elem => {
+        elem.id = elem.id + "_" + ensayoCounter;
+      });
+      const logoData = localStorage.getItem("logoData");
+      if (logoData) {
+        clone.querySelectorAll(".logoImage").forEach(img => {
+          img.src = logoData;
+        });
+      }
+      document.getElementById("ensayosContainer").appendChild(clone);
+      actualizarPuntosEnsayo();
+      actualizarObservacionNormativa();
+    }
+    function eliminarEnsayo(btn) {
+      const ensayo = btn.closest(".ensayo");
+      if (ensayo) {
+        ensayo.remove();
+      }
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      const metodo = localStorage.getItem("modoCalculo") || "tabla";
+      document.getElementById("modoCalculo").value = metodo;
+      actualizarVisibilidadAngulo();
+      actualizarNormativa();
+      if (!document.getElementById("ensayosContainer").hasChildNodes()) {
+        agregarEnsayo();
+      }
+    });
+    function recalcularEnsayos() {
+      document.querySelectorAll(".tablaRebotes tbody tr td[oninput]").forEach(cell => recalcularFila(cell));
+    }
+  </script>
+</body>
+</html>
